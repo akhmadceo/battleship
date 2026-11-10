@@ -1,4 +1,4 @@
-import { DirectionalLight, Engine, HemisphericLight, Scene, Vector3 } from '@babylonjs/core';
+import { Engine, Scene } from '@babylonjs/core';
 import { Game } from './game';
 import './style.css';
 
@@ -11,11 +11,6 @@ engine.setHardwareScalingLevel(1 / Math.min(window.devicePixelRatio || 1, 2));
 
 const scene = new Scene(engine);
 scene.skipPointerMovePicking = true;
-
-const hemi = new HemisphericLight('sky-light', new Vector3(0, 1, 0), scene);
-hemi.intensity = 0.75;
-const sun = new DirectionalLight('sun', new Vector3(-0.4, -0.8, -0.3), scene);
-sun.intensity = 0.8;
 
 const seedParam = Number(new URLSearchParams(location.search).get('seed'));
 const seed = Number.isFinite(seedParam) && seedParam > 0 ? seedParam : Math.floor(Math.random() * 1e9);

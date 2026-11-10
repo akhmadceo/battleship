@@ -2,10 +2,10 @@ import { Color3, type Scene, StandardMaterial } from '@babylonjs/core';
 
 /** The whole game's colours. One small palette keeps the low-poly look coherent. */
 export const PALETTE = {
-  skyTop: '#5fb4d9',
-  skyHorizon: '#cfeef2',
-  seaDeep: '#11698e',
-  seaShallow: '#2fa8b5',
+  skyTop: '#3f93c9',
+  skyHorizon: '#bfe0ec',
+  seaDeep: '#0a4e78',
+  seaShallow: '#1c97ad',
   foam: '#e8fbfa',
   sand: '#e9d29a',
   grass: '#7cbf5a',

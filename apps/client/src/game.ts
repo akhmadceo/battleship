@@ -30,8 +30,9 @@ import { CameraRig } from './camera';
 import { Fx } from './fx';
 import { Hud } from './hud';
 import { mat } from './palette';
+import { type Rendering, setupRendering } from './render';
 import { createSea, type Sea } from './sea';
-import { CLASS_NAMES, buildShip, ghostOf } from './ships';
+import { CLASS_NAMES, buildShip, foamRing, ghostOf } from './ships';
 import { CELL, cellCenter, shipCenter, shipYaw, waveHeight, worldToCell } from './world';
 
 const PLAN_SECONDS = 20;
@@ -52,6 +53,7 @@ interface ShipVisual {
   /** Extra tilt and sink for wrecks. */
   sink: number;
   tilt: number;
+  foam: Mesh | null;
 }
 
 interface Timer {
@@ -69,6 +71,7 @@ export class Game {
   private readonly sea: Sea;
   private readonly fx: Fx;
   private readonly hud: Hud;
+  private readonly rendering: Rendering;
 
   private state!: MatchState;
   private phase: 'plan' | 'resolve' | 'over' = 'plan';
@@ -96,6 +99,8 @@ export class Game {
   ) {
     this.rig = new CameraRig(scene);
     this.sea = createSea(scene);
+    const lowPower = matchMedia('(pointer: coarse)').matches || Math.min(innerWidth, innerHeight) < 600;
+    this.rendering = setupRendering(scene, this.rig.camera, lowPower);
     this.fx = new Fx(scene);
     this.hud = new Hud(overlay, {
       ready: () => this.ready(),
@@ -122,6 +127,7 @@ export class Game {
     for (const v of [...this.ships.values(), ...this.wrecks]) {
       v.node.dispose();
       v.ghost.dispose();
+      v.foam?.dispose();
     }
     this.ships.clear();
     this.wrecks = [];
@@ -145,7 +151,9 @@ export class Game {
         yaw: shipYaw(s.placement),
         sink: 0,
         tilt: 0,
+        foam: foamRing(this.scene, s.placement.cls, `${s.placement.id}-foam`),
       };
+      for (const m of node.getChildMeshes()) this.rendering.shadows.addShadowCaster(m);
       this.ships.set(s.placement.id, v);
     }
     this.active = this.order()[0] ?? '';
@@ -387,7 +395,8 @@ export class Game {
 
   private revealWreck(p: ShipPlacement): void {
     const node = buildShip(this.scene, p.cls, 'red', `wreck-${p.id}`);
-    const v: ShipVisual = { node, ghost: node, pos: shipCenter('enemy', p), yaw: shipYaw(p), sink: 0, tilt: 0 };
+    const v: ShipVisual = { node, ghost: node, pos: shipCenter('enemy', p), yaw: shipYaw(p), sink: 0, tilt: 0, foam: null };
+    for (const m of node.getChildMeshes()) this.rendering.shadows.addShadowCaster(m);
     this.wrecks.push(v);
     let t = 0;
     this.animations.push((dt) => {
@@ -538,6 +547,10 @@ export class Game {
       const hz = waveHeight(v.pos.x, v.pos.z + 3, this.time) - waveHeight(v.pos.x, v.pos.z - 3, this.time);
       v.node.position.set(v.pos.x, h * 0.8 + v.sink, v.pos.z);
       v.node.rotation.set(-hz * 0.06 + v.tilt * 0.4, v.yaw, hx * 0.06 + v.tilt);
+      if (v.foam) {
+        v.foam.position.set(v.pos.x, h + 0.25, v.pos.z);
+        v.foam.rotation.y = v.yaw;
+      }
     };
     for (const v of this.ships.values()) bob(v);
     for (const v of this.wrecks) bob(v);
