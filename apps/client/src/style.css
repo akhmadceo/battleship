@@ -1,0 +1,88 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeef2; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; outline: none; touch-action: none; }
+#overlay { position: fixed; inset: 0; pointer-events: none; }
+
+.hud { position: absolute; inset: 0; color: #fff; text-shadow: 0 1px 2px rgba(0, 20, 40, 0.5); }
+.hud button { pointer-events: auto; font: inherit; color: #12324a; background: rgba(255, 255, 255, 0.88); border: 0; border-radius: 10px; padding: 8px 12px; cursor: pointer; box-shadow: 0 2px 6px rgba(0, 30, 60, 0.25); text-shadow: none; }
+.hud button:hover { background: #fff; }
+.hud button.on { background: #ffe066; }
+.hud button:disabled { opacity: 0.5; cursor: default; }
+.hud kbd { font: 11px ui-monospace, monospace; padding: 1px 4px; border-radius: 4px; background: rgba(18, 50, 74, 0.12); margin-left: 4px; }
+.hidden { display: none !important; }
+
+.top { position: absolute; top: 12px; left: 16px; right: 16px; display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.brand { font-weight: 800; font-size: 20px; letter-spacing: 0.5px; }
+.brand span { font-weight: 500; font-size: 12px; opacity: 0.8; margin-left: 6px; }
+.round { flex: 0 1 320px; text-align: center; font-weight: 600; }
+.bar { height: 6px; margin-top: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.35); overflow: hidden; }
+.fill { height: 100%; background: #ffe066; transition: width 0.2s linear; }
+.views { display: flex; gap: 8px; }
+
+.enemy { position: absolute; top: 60px; left: 16px; font-size: 13px; background: rgba(10, 40, 60, 0.35); border-radius: 10px; padding: 8px 10px; }
+.enemy-title { font-weight: 700; margin-bottom: 4px; }
+.enemy-list div { display: flex; gap: 6px; }
+.enemy-list span { width: 72px; }
+.enemy-list b { color: #ffb38a; letter-spacing: 1px; }
+.enemy-list .gone { opacity: 0.4; text-decoration: line-through; }
+
+.log { position: absolute; top: 60px; right: 16px; margin: 0; padding: 0; list-style: none; width: 260px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
+.log li { background: rgba(10, 40, 60, 0.4); border-radius: 8px; padding: 5px 9px; animation: pop 0.25s ease-out; }
+.log li.hit { background: rgba(200, 80, 20, 0.7); }
+.log li.sunk { background: rgba(180, 20, 30, 0.8); font-weight: 700; }
+.log li.miss { background: rgba(20, 90, 130, 0.5); }
+@keyframes pop { from { transform: translateX(12px); opacity: 0; } }
+
+.cell-label { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); font-size: 34px; font-weight: 800; color: #ffe066; }
+
+.bottom { position: absolute; left: 16px; right: 16px; bottom: 16px; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.card { pointer-events: auto; background: rgba(10, 40, 60, 0.45); border-radius: 12px; padding: 10px 12px; min-width: 220px; }
+.card-name { font-weight: 800; font-size: 16px; }
+.card-info { font-size: 13px; margin: 4px 0 8px; }
+.card-info i { font-style: normal; color: #ff7b5a; }
+.hud button.small { padding: 5px 10px; font-size: 13px; }
+.hud button.fire { font-size: 20px; font-weight: 800; padding: 16px 26px; border-radius: 16px; background: #ff7043; color: #fff; }
+.hud button.fire:hover { background: #ff8a5e; }
+
+.pad { display: none; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); gap: 4px; }
+.pad button { padding: 0; font-size: 18px; }
+.pad [data-move='0,1'] { grid-column: 2; grid-row: 1; }
+.pad [data-move='-1,0'] { grid-column: 1; grid-row: 2; }
+.pad [data-move='1,0'] { grid-column: 3; grid-row: 2; }
+.pad [data-move='0,-1'] { grid-column: 2; grid-row: 3; }
+
+.banner { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); text-align: center; background: rgba(10, 40, 60, 0.7); padding: 24px 36px; border-radius: 18px; pointer-events: auto; }
+.banner-title { font-size: 44px; font-weight: 900; }
+.banner-sub { margin: 6px 0 14px; }
+
+.help { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%); width: min(720px, calc(100% - 32px)); font-size: 13px; text-align: center; background: rgba(10, 40, 60, 0.5); border-radius: 10px; padding: 8px 32px 8px 12px; pointer-events: auto; }
+.help .help-close { position: absolute; right: 4px; top: 4px; padding: 2px 7px; font-size: 12px; }
+
+@media (pointer: coarse), (max-width: 700px) {
+  .pad { display: grid; }
+  .help { display: none; }
+  .log { width: 190px; font-size: 12px; }
+  .log li:nth-child(n + 4) { display: none; }
+  .brand span, .hud kbd { display: none; }
+  .card { min-width: 0; font-size: 12px; }
+  .enemy { font-size: 11px; }
+  .cell-label { bottom: 180px; }
+}
+@media (max-width: 520px) {
+  .top { left: 12px; right: 12px; top: 10px; }
+  .brand { font-size: 15px; }
+  .round { font-size: 12px; }
+  .views button { padding: 6px 9px; }
+  .enemy { top: 54px; left: 12px; font-size: 10px; padding: 6px 8px; }
+  .enemy-list span { width: 56px; }
+  .log { top: 54px; right: 12px; bottom: auto; width: 48%; font-size: 11px; }
+  .log li:nth-child(n + 3) { display: none; }
+  .bottom { left: 12px; right: 12px; bottom: 12px; flex-wrap: wrap; }
+  .card { flex: 1 1 100%; padding: 6px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+  .card-name { font-size: 14px; }
+  .card-info { margin: 0; font-size: 11px; }
+  .card button.small { margin-left: auto; }
+  .pad { grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(3, 42px); }
+  .hud button.fire { padding: 14px 22px; font-size: 18px; }
+  .cell-label { bottom: 210px; font-size: 28px; }
+}

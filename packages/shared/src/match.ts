@@ -1,5 +1,13 @@
 import { type Cell, GRID_SIZE, cellKey, inBounds, neighbors8 } from './grid.js';
-import { type FleetError, type ShipClass, type ShipPlacement, SHIP_CLASSES, shipCells, validateFleet } from './fleet.js';
+import {
+  type FleetError,
+  type ShipClass,
+  type ShipPlacement,
+  SHIP_CLASSES,
+  fitsAmong,
+  shipCells,
+  validateFleet,
+} from './fleet.js';
 
 export type TeamId = string;
 
@@ -7,9 +15,10 @@ export type TeamId = string;
 export type Mark = 'miss' | 'hit' | 'sunk' | 'empty';
 
 export interface ShipState {
+  /** Current position. Changes when the ship moves. */
   readonly placement: ShipPlacement;
-  /** Cell keys of this ship that have been hit. */
-  readonly hits: readonly string[];
+  /** Hit segments, as indices from the bow (0) to the stern (size - 1). */
+  readonly hits: readonly number[];
   readonly sunk: boolean;
 }
 
@@ -33,8 +42,17 @@ export interface FireOrder {
   readonly targets: readonly Cell[];
 }
 
-/** Movement and abilities arrive in Milestone 1; for now an order is a salvo. */
-export type Order = FireOrder;
+/** Moves the whole ship by (dx, dy) cells without turning it. */
+export interface MoveOrder {
+  readonly kind: 'move';
+  readonly team: TeamId;
+  readonly shipId: string;
+  readonly dx: number;
+  readonly dy: number;
+}
+
+/** Each ship may give one move order and one fire order per round. */
+export type Order = FireOrder | MoveOrder;
 
 export type ShotResult = 'miss' | 'hit' | 'sunk' | 'repeat';
 
@@ -46,10 +64,19 @@ export type RejectReason =
   | 'duplicate-order'
   | 'too-many-shots'
   | 'no-targets'
-  | 'out-of-bounds';
+  | 'out-of-bounds'
+  | 'too-far'
+  | 'blocked';
 
 export type MatchEvent =
-  | { readonly kind: 'order-rejected'; readonly team: TeamId; readonly shipId: string; readonly reason: RejectReason }
+  | {
+      readonly kind: 'order-rejected';
+      readonly team: TeamId;
+      readonly shipId: string;
+      readonly order: Order['kind'];
+      readonly reason: RejectReason;
+    }
+  | { readonly kind: 'ship-moved'; readonly team: TeamId; readonly shipId: string; readonly from: Cell; readonly to: Cell }
   | {
       readonly kind: 'shot';
       readonly team: TeamId;
@@ -86,62 +113,108 @@ export function createMatch(
   return { round: 0, teams: [build(teams[0]), build(teams[1])], winner: null };
 }
 
+interface WorkingShip {
+  placement: ShipPlacement;
+  hits: number[];
+  sunk: boolean;
+}
+
 /**
  * Resolves one round. Pure and deterministic: the same state and orders
  * always give the same result, whatever order the orders arrived in.
  *
- * Orders are simultaneous: every ship afloat at the start of the round may
- * fire, even if it is sunk by a shell in the same round.
+ * 1. Orders are validated against the state at the start of the round.
+ * 2. All moves happen first, so a ship can dodge a salvo aimed at where it was.
+ * 3. Then all shells land. Orders are simultaneous: every ship afloat at the
+ *    start of the round may fire, even if it is sunk in the same round.
  */
 export function resolveRound(state: MatchState, orders: readonly Order[]): RoundResult {
   const events: MatchEvent[] = [];
   const teamIndex = new Map(state.teams.map((t, i) => [t.id, i] as const));
 
-  // Mutable working copies.
-  const ships = state.teams.map((t) => t.ships.map((s) => ({ placement: s.placement, hits: [...s.hits], sunk: s.sunk })));
+  const ships: WorkingShip[][] = state.teams.map((t) =>
+    t.ships.map((s) => ({ placement: s.placement, hits: [...s.hits], sunk: s.sunk })),
+  );
   const marks = state.teams.map((t) => ({ ...t.marks }));
 
-  const sorted = [...orders].sort((a, b) => (a.team === b.team ? cmp(a.shipId, b.shipId) : cmp(a.team, b.team)));
-  const accepted: Order[] = [];
+  const sorted = [...orders].sort(
+    (a, b) => cmp(a.team, b.team) || cmp(a.shipId, b.shipId) || cmp(a.kind, b.kind),
+  );
+  const moves: MoveOrder[] = [];
+  const fires: FireOrder[] = [];
   const seen = new Set<string>();
 
   for (const o of sorted) {
     const reject = (reason: RejectReason) =>
-      events.push({ kind: 'order-rejected', team: o.team, shipId: o.shipId, reason });
+      events.push({ kind: 'order-rejected', team: o.team, shipId: o.shipId, order: o.kind, reason });
     if (state.winner !== null) { reject('match-over'); continue; }
     const ti = teamIndex.get(o.team);
     if (ti === undefined) { reject('unknown-team'); continue; }
     const ship = state.teams[ti]?.ships.find((s) => s.placement.id === o.shipId);
     if (!ship) { reject('unknown-ship'); continue; }
     if (ship.sunk) { reject('ship-sunk'); continue; }
-    const key = `${o.team}|${o.shipId}`;
+    const key = `${o.team}|${o.shipId}|${o.kind}`;
     if (seen.has(key)) { reject('duplicate-order'); continue; }
-    if (o.targets.length === 0) { reject('no-targets'); continue; }
-    if (o.targets.length > SHIP_CLASSES[ship.placement.cls].shotsPerRound) { reject('too-many-shots'); continue; }
-    if (o.targets.some((c) => !inBounds(c))) { reject('out-of-bounds'); continue; }
+    const spec = SHIP_CLASSES[ship.placement.cls];
+    if (o.kind === 'fire') {
+      if (o.targets.length === 0) { reject('no-targets'); continue; }
+      if (o.targets.length > spec.shotsPerRound) { reject('too-many-shots'); continue; }
+      if (o.targets.some((c) => !inBounds(c))) { reject('out-of-bounds'); continue; }
+      fires.push(o);
+    } else {
+      const dist = Math.abs(o.dx) + Math.abs(o.dy);
+      if (!Number.isInteger(o.dx) || !Number.isInteger(o.dy) || dist === 0 || dist > spec.speed) {
+        reject('too-far');
+        continue;
+      }
+      moves.push(o);
+    }
     seen.add(key);
-    accepted.push(o);
   }
 
-  for (const o of accepted) {
+  // Moves, in deterministic order. Each is checked against the fleet as it stands
+  // after the moves before it, so two ships cannot end up touching.
+  for (const o of moves) {
+    const ti = teamIndex.get(o.team)!;
+    const fleet = ships[ti]!;
+    const ship = fleet.find((s) => s.placement.id === o.shipId)!;
+    const from = { x: ship.placement.x, y: ship.placement.y };
+    const moved: ShipPlacement = { ...ship.placement, x: from.x + o.dx, y: from.y + o.dy };
+    if (shipCells(moved).some((c) => !inBounds(c))) {
+      events.push({ kind: 'order-rejected', team: o.team, shipId: o.shipId, order: 'move', reason: 'out-of-bounds' });
+      continue;
+    }
+    if (!fitsAmong(moved, fleet.map((s) => s.placement))) {
+      events.push({ kind: 'order-rejected', team: o.team, shipId: o.shipId, order: 'move', reason: 'blocked' });
+      continue;
+    }
+    ship.placement = moved;
+    events.push({ kind: 'ship-moved', team: o.team, shipId: o.shipId, from, to: { x: moved.x, y: moved.y } });
+  }
+
+  for (const o of fires) {
     const ti = teamIndex.get(o.team)!;
     const ei = 1 - ti;
     const enemyShips = ships[ei]!;
     const myMarks = marks[ti]!;
     for (const target of o.targets) {
       const k = cellKey(target);
-      const victim = enemyShips.find((s) => shipCells(s.placement).some((c) => cellKey(c) === k));
+      let victim: WorkingShip | undefined;
+      let segment = -1;
+      for (const s of enemyShips) {
+        const idx = shipCells(s.placement).findIndex((c) => cellKey(c) === k);
+        if (idx >= 0) { victim = s; segment = idx; break; }
+      }
       if (!victim) {
-        const already = myMarks[k] !== undefined;
-        if (!already) myMarks[k] = 'miss';
-        events.push({ kind: 'shot', team: o.team, shipId: o.shipId, target, result: already ? 'repeat' : 'miss' });
+        if (myMarks[k] !== 'sunk') myMarks[k] = 'miss';
+        events.push({ kind: 'shot', team: o.team, shipId: o.shipId, target, result: 'miss' });
         continue;
       }
-      if (victim.hits.includes(k)) {
+      if (victim.hits.includes(segment)) {
         events.push({ kind: 'shot', team: o.team, shipId: o.shipId, target, result: 'repeat' });
         continue;
       }
-      victim.hits.push(k);
+      victim.hits.push(segment);
       const cells = shipCells(victim.placement);
       if (victim.hits.length < cells.length) {
         myMarks[k] = 'hit';
@@ -150,11 +223,11 @@ export function resolveRound(state: MatchState, orders: readonly Order[]): Round
       }
       victim.sunk = true;
       for (const c of cells) myMarks[cellKey(c)] = 'sunk';
-      // Classic rule: cells around a sunk ship cannot hold a ship, so mark them.
+      // Classic rule: ships never touch, so the ring around a sunk ship is empty water.
       for (const c of cells) {
         for (const n of neighbors8(c, GRID_SIZE)) {
           const nk = cellKey(n);
-          if (myMarks[nk] === undefined) myMarks[nk] = 'empty';
+          if (myMarks[nk] !== 'sunk') myMarks[nk] = 'empty';
         }
       }
       events.push({ kind: 'shot', team: o.team, shipId: o.shipId, target, result: 'sunk' });
@@ -206,6 +279,14 @@ export function viewFor(state: MatchState, team: TeamId): TeamView {
     enemySunk: enemy.ships.filter((s) => s.sunk).map((s) => s.placement),
     enemyAfloat,
   };
+}
+
+/**
+ * The events one team may see: everything except the enemy's movements and
+ * the enemy's rejected orders, which would give away where their ships are.
+ */
+export function eventsFor(events: readonly MatchEvent[], team: TeamId): MatchEvent[] {
+  return events.filter((e) => (e.kind === 'ship-moved' || e.kind === 'order-rejected' ? e.team === team : true));
 }
 
 function cmp(a: string, b: string): number {

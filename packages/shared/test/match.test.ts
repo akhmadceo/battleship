@@ -3,11 +3,13 @@ import {
   InvalidFleetError,
   createMatch,
   createRng,
+  eventsFor,
   randomFleet,
   resolveRound,
   shipCells,
   viewFor,
   type FireOrder,
+  type MoveOrder,
   type MatchState,
 } from '../src/index.js';
 import { FLEET } from './fixtures.js';
@@ -58,7 +60,9 @@ describe('resolveRound', () => {
     const ok = resolveRound(newMatch(), [fire('blue', 'iron', [9, 0], [9, 1])]);
     expect(ok.events.filter((e) => e.kind === 'shot')).toHaveLength(2);
     const bad = resolveRound(newMatch(), [fire('blue', 'iron', [9, 0], [9, 1], [9, 2])]);
-    expect(bad.events).toEqual([{ kind: 'order-rejected', team: 'blue', shipId: 'iron', reason: 'too-many-shots' }]);
+    expect(bad.events).toEqual([
+      { kind: 'order-rejected', team: 'blue', shipId: 'iron', order: 'fire', reason: 'too-many-shots' },
+    ]);
   });
 
   it('rejects bad orders without changing the board', () => {
@@ -80,11 +84,17 @@ describe('resolveRound', () => {
     expect(r.events.filter((e) => e.kind === 'order-rejected')).toHaveLength(1);
   });
 
-  it('marks a repeat shot without counting it twice', () => {
+  it('reports a repeat hit on the same segment without counting it twice', () => {
     const first = resolveRound(newMatch(), [fire('blue', 'sk1', [0, 0])]);
     const second = resolveRound(first.state, [fire('blue', 'sk1', [0, 0])]);
     expect(second.events[0]).toMatchObject({ result: 'repeat' });
-    expect(second.state.teams[1].ships.find((s) => s.placement.id === 'iron')!.hits).toEqual(['0,0']);
+    expect(second.state.teams[1].ships.find((s) => s.placement.id === 'iron')!.hits).toEqual([0]);
+  });
+
+  it('re-checks a cell marked as a miss, because ships move', () => {
+    const first = resolveRound(newMatch(), [fire('blue', 'sk1', [9, 0])]);
+    const second = resolveRound(first.state, [fire('blue', 'sk1', [9, 0])]);
+    expect(second.events[0]).toMatchObject({ result: 'miss' });
   });
 
   it('is simultaneous: a ship sunk this round still fires', () => {
@@ -112,7 +122,9 @@ describe('resolveRound', () => {
     for (const t of targets) s = resolveRound(s, [fire('blue', 'sk1', [t.x, t.y])]).state;
     expect(s.winner).toBe('blue');
     const after = resolveRound(s, [fire('red', 'sk1', [0, 0])]);
-    expect(after.events).toEqual([{ kind: 'order-rejected', team: 'red', shipId: 'sk1', reason: 'match-over' }]);
+    expect(after.events).toEqual([
+      { kind: 'order-rejected', team: 'red', shipId: 'sk1', order: 'fire', reason: 'match-over' },
+    ]);
   });
 
   it('declares a draw when both fleets go down in the same round', () => {
@@ -125,6 +137,56 @@ describe('resolveRound', () => {
       s = resolveRound(s, [fire('blue', shooter(0), [t.x, t.y]), fire('red', shooter(1), [t.x, t.y])]).state;
     }
     expect(s.winner).toBe('draw');
+  });
+});
+
+const move = (team: string, shipId: string, dx: number, dy: number): MoveOrder => ({ kind: 'move', team, shipId, dx, dy });
+const shipOf = (s: MatchState, team: 0 | 1, id: string) => s.teams[team].ships.find((x) => x.placement.id === id)!;
+
+describe('movement', () => {
+  it('moves a ship and reports it', () => {
+    const r = resolveRound(newMatch(), [move('blue', 'sk4', -1, 0)]);
+    expect(r.events).toEqual([{ kind: 'ship-moved', team: 'blue', shipId: 'sk4', from: { x: 9, y: 9 }, to: { x: 8, y: 9 } }]);
+    expect(shipOf(r.state, 0, 'sk4').placement).toMatchObject({ x: 8, y: 9 });
+  });
+
+  it('lets a cutter move 2 cells but a skiff only 1', () => {
+    expect(resolveRound(newMatch(), [move('blue', 'cut3', 0, 2)]).events[0]).toMatchObject({ kind: 'ship-moved' });
+    expect(resolveRound(newMatch(), [move('blue', 'sk4', -2, 0)]).events[0]).toMatchObject({ reason: 'too-far' });
+    expect(resolveRound(newMatch(), [move('blue', 'sk4', 0, 0)]).events[0]).toMatchObject({ reason: 'too-far' });
+  });
+
+  it('refuses to leave the board or touch another own ship', () => {
+    expect(resolveRound(newMatch(), [move('blue', 'sk4', 1, 0)]).events[0]).toMatchObject({ reason: 'out-of-bounds' });
+    // sk2 at (4,4) moving left to (3,4) would touch sk1 at (2,4).
+    expect(resolveRound(newMatch(), [move('blue', 'sk2', -1, 0)]).events[0]).toMatchObject({ reason: 'blocked' });
+  });
+
+  it('resolves moves before shots, so a ship can dodge', () => {
+    const r = resolveRound(newMatch(), [fire('red', 'sk1', [9, 9]), move('blue', 'sk4', 0, -1)]);
+    expect(r.events.find((e) => e.kind === 'shot')).toMatchObject({ result: 'miss' });
+    expect(shipOf(r.state, 0, 'sk4').sunk).toBe(false);
+  });
+
+  it('keeps damage on the right segment after a move', () => {
+    let s = resolveRound(newMatch(), [fire('red', 'sk1', [8, 2])]).state; // bow of blue cut3 at (8,2)-(8,3)
+    s = resolveRound(s, [move('blue', 'cut3', 0, 1)]).state; // now (8,3)-(8,4)
+    const r = resolveRound(s, [fire('red', 'sk1', [8, 3])]); // bow again
+    expect(r.events[0]).toMatchObject({ result: 'repeat' });
+    const sunk = resolveRound(s, [fire('red', 'sk1', [8, 4])]);
+    expect(sunk.events[0]).toMatchObject({ result: 'sunk' });
+  });
+
+  it('allows one move and one fire order per ship per round', () => {
+    const r = resolveRound(newMatch(), [move('blue', 'sk4', -1, 0), fire('blue', 'sk4', [0, 9]), move('blue', 'sk4', 0, -1)]);
+    expect(r.events.filter((e) => e.kind === 'order-rejected')).toEqual([
+      { kind: 'order-rejected', team: 'blue', shipId: 'sk4', order: 'move', reason: 'duplicate-order' },
+    ]);
+  });
+
+  it('hides enemy movements in eventsFor', () => {
+    const r = resolveRound(newMatch(), [move('blue', 'sk4', -1, 0), move('red', 'sk4', -1, 0)]);
+    expect(eventsFor(r.events, 'blue').map((e) => (e.kind === 'ship-moved' ? e.team : ''))).toEqual(['blue']);
   });
 });
 

@@ -9,14 +9,16 @@ export interface ShipClassSpec {
   readonly count: number;
   /** Shells fired per round when the ship fires. */
   readonly shotsPerRound: number;
+  /** Cells the ship may move per round (Manhattan distance). */
+  readonly speed: number;
 }
 
 /** The classic fleet: 1×4, 2×3, 3×2, 4×1 = 10 ships, 20 cells. */
 export const SHIP_CLASSES: Readonly<Record<ShipClass, ShipClassSpec>> = {
-  ironclad: { size: 4, count: 1, shotsPerRound: 2 },
-  corvette: { size: 3, count: 2, shotsPerRound: 1 },
-  cutter: { size: 2, count: 3, shotsPerRound: 1 },
-  skiff: { size: 1, count: 4, shotsPerRound: 1 },
+  ironclad: { size: 4, count: 1, shotsPerRound: 2, speed: 1 },
+  corvette: { size: 3, count: 2, shotsPerRound: 1, speed: 1 },
+  cutter: { size: 2, count: 3, shotsPerRound: 1, speed: 2 },
+  skiff: { size: 1, count: 4, shotsPerRound: 1, speed: 1 },
 };
 
 export const SHIP_CLASS_ORDER: readonly ShipClass[] = ['ironclad', 'corvette', 'cutter', 'skiff'];
@@ -101,6 +103,24 @@ export function validateFleet(fleet: readonly ShipPlacement[], size = GRID_SIZE)
   }
 
   return errors;
+}
+
+/**
+ * True when `ship` lies fully on the board and neither overlaps nor touches
+ * (even diagonally) any of `others`.
+ */
+export function fitsAmong(ship: ShipPlacement, others: readonly ShipPlacement[], size = GRID_SIZE): boolean {
+  const cells = shipCells(ship);
+  if (cells.some((c) => !inBounds(c, size))) return false;
+  const blocked = new Set<string>();
+  for (const o of others) {
+    if (o.id === ship.id) continue;
+    for (const c of shipCells(o)) {
+      blocked.add(cellKey(c));
+      for (const n of neighbors8(c, size)) blocked.add(cellKey(n));
+    }
+  }
+  return cells.every((c) => !blocked.has(cellKey(c)));
 }
 
 /**
