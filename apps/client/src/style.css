@@ -46,10 +46,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #cfeef2; fon
 
 .pad { display: none; grid-template-columns: repeat(3, 48px); grid-template-rows: repeat(3, 48px); gap: 4px; }
 .pad button { padding: 0; font-size: 18px; }
-.pad [data-move='0,1'] { grid-column: 2; grid-row: 1; }
+.pad [data-move='0,-1'] { grid-column: 2; grid-row: 1; }
 .pad [data-move='-1,0'] { grid-column: 1; grid-row: 2; }
 .pad [data-move='1,0'] { grid-column: 3; grid-row: 2; }
-.pad [data-move='0,-1'] { grid-column: 2; grid-row: 3; }
+.pad [data-move='0,1'] { grid-column: 2; grid-row: 3; }
 
 .banner { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); text-align: center; background: rgba(10, 40, 60, 0.7); padding: 24px 36px; border-radius: 18px; pointer-events: auto; }
 .banner-title { font-size: 44px; font-weight: 900; }

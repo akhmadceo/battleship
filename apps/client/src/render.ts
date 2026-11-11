@@ -68,10 +68,12 @@ export function setupRendering(scene: Scene, camera: Camera, lowPower: boolean):
   pipeline.imageProcessing.toneMappingEnabled = true;
   pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
   pipeline.imageProcessing.exposure = 1.05;
-  pipeline.imageProcessing.contrast = 1.12;
+  pipeline.imageProcessing.contrast = 1.18;
   pipeline.imageProcessing.vignetteEnabled = true;
   pipeline.imageProcessing.vignetteWeight = 1.2;
   pipeline.imageProcessing.vignetteStretch = 0.4;
+  pipeline.imageProcessing.colorCurvesEnabled = true;
+  pipeline.imageProcessing.colorCurves!.globalSaturation = 28;
   pipeline.sharpenEnabled = !lowPower;
   pipeline.sharpen.edgeAmount = 0.15;
 

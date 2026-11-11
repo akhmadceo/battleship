@@ -1,19 +1,20 @@
 import { type Scene, UniversalCamera, Vector3 } from '@babylonjs/core';
 import { GRID_CENTER } from './world';
 
-export type CameraMode = 'chase' | 'aim' | 'tactical';
+export type CameraMode = 'overview' | 'chase' | 'aim';
 
-const ZOOM_DISTANCES = [42, 62, 95];
+const ZOOM = [0.72, 1, 1.35];
 const MAX_YAW = Math.PI / 3; // ±60°
 
 /**
- * Third-person camera rig. Chase view sits behind and above the active ship
- * looking toward the enemy sea; aim view lifts up to read the grid; tactical
- * view looks straight down over both seas. Every change is a smooth blend.
+ * Camera rig. Overview frames both floating islands side by side like the
+ * paper game; chase sits behind and above the active ship looking across at
+ * the enemy island; aim hangs in front of the enemy board to read its grid.
+ * Every change is a smooth blend.
  */
 export class CameraRig {
   readonly camera: UniversalCamera;
-  mode: CameraMode = 'chase';
+  mode: CameraMode = 'overview';
   /** Ship (or point) the camera follows. */
   anchor = new Vector3(0, 0, 0);
   /** Temporary focus during round playback (a flying shell). */
@@ -26,12 +27,12 @@ export class CameraRig {
   private readonly target = new Vector3();
 
   constructor(scene: Scene) {
-    this.camera = new UniversalCamera('cam', new Vector3(0, 40, -200), scene);
-    this.camera.fov = 0.95;
+    this.camera = new UniversalCamera('cam', new Vector3(0, 160, -260), scene);
+    this.camera.fov = 0.9;
     this.camera.minZ = 0.5;
-    this.camera.maxZ = 3000;
+    this.camera.maxZ = 4000;
     this.camera.inputs.clear();
-    this.desired(this.pos, this.target, 1);
+    this.desired(this.pos, this.target, 16 / 9);
     this.camera.position.copyFrom(this.pos);
     this.camera.setTarget(this.target);
   }
@@ -40,8 +41,9 @@ export class CameraRig {
     this.mode = mode;
   }
 
-  toggle(mode: Exclude<CameraMode, 'chase'>): void {
-    this.mode = this.mode === mode ? 'chase' : mode;
+  /** Switch to a view, or back to the overview if it is already on. */
+  toggle(mode: Exclude<CameraMode, 'overview'>): void {
+    this.mode = this.mode === mode ? 'overview' : mode;
   }
 
   orbit(deltaYaw: number): void {
@@ -50,39 +52,43 @@ export class CameraRig {
   }
 
   cycleZoom(dir: 1 | -1): void {
-    this.zoom = Math.max(0, Math.min(ZOOM_DISTANCES.length - 1, this.zoom + dir));
+    this.zoom = Math.max(0, Math.min(ZOOM.length - 1, this.zoom + dir));
   }
 
   private desired(pos: Vector3, target: Vector3, aspect: number): void {
-    const forward = new Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    // Portrait phones see less to the sides, so pull back.
-    const dist = ZOOM_DISTANCES[this.zoom]! * (aspect < 1 ? 1.5 : 1);
-    if (this.mode === 'tactical') {
-      // Fit both seas (z -130..130, x -60..60) with a perspective camera looking almost straight down.
-      const half = Math.tan(this.camera.fov / 2);
-      const h = Math.max(145 / half, 70 / (half * aspect)) + 10;
-      pos.set(0, h, -1);
-      target.set(0, 0, 0);
+    const z = ZOOM[this.zoom]!;
+    const tanH = Math.tan(this.camera.fov / 2);
+    if (this.mode === 'overview') {
+      // Fit both islands (x ±165) and their depth, seen from the front and above.
+      const dist = Math.max((aspect < 1 ? 152 : 168) / (tanH * aspect), 115 / tanH) * z;
+      const pitch = aspect < 1 ? 1.0 : 0.74; // ~42° down, steeper on tall screens
+      const sideways = Math.sin(this.yaw) * dist * 0.5;
+      target.set(0, -6, 6);
+      pos.set(sideways, Math.sin(pitch) * dist - 6, 6 - Math.cos(pitch) * dist);
       return;
     }
     if (this.mode === 'aim') {
-      // Hover over the channel, high up, looking down the enemy sea from our side.
       const look = GRID_CENTER.enemy;
-      const x = this.anchor.x * 0.5 + Math.sin(this.yaw) * 60;
-      pos.set(x, 95 + this.zoom * 25, look.z - 115 - this.zoom * 25);
-      target.set(look.x + x * 0.2, 0, look.z - 8);
+      const dist = Math.max(72 / (tanH * aspect), 76 / tanH) * z;
+      const pitch = 0.95;
+      target.set(look.x, 0, look.z + 4);
+      pos.set(look.x + Math.sin(this.yaw) * dist * 0.6, Math.sin(pitch) * dist, look.z + 4 - Math.cos(pitch) * dist);
       return;
     }
-    pos.copyFrom(this.anchor).addInPlace(forward.scale(-dist)).addInPlace(new Vector3(0, dist * 0.42, 0));
-    target.copyFrom(this.anchor).addInPlace(forward.scale(32)).addInPlace(new Vector3(0, 4, 0));
-    if (this.focus) Vector3.LerpToRef(target, this.focus, 0.65, target);
+    // Chase: behind our ship, looking across the gap at the enemy island (+x).
+    const heading = Math.PI / 2 + this.yaw;
+    const forward = new Vector3(Math.sin(heading), 0, Math.cos(heading));
+    const dist = 58 * z * (aspect < 1 ? 1.5 : 1);
+    pos.copyFrom(this.anchor).addInPlace(forward.scale(-dist)).addInPlace(new Vector3(0, dist * 0.5, 0));
+    target.copyFrom(this.anchor).addInPlace(forward.scale(40)).addInPlace(new Vector3(0, 2, 0));
+    if (this.focus) Vector3.LerpToRef(target, this.focus, 0.6, target);
   }
 
   update(dt: number, aspect: number): void {
     this.idle += dt;
-    if (this.idle > 2 && this.mode === 'chase') this.yaw *= Math.exp(-dt * 2.5); // drift back behind the ship
+    if (this.idle > 2) this.yaw *= Math.exp(-dt * 2.5); // drift back to the default angle
     this.desired(this.pos, this.target, aspect);
-    const k = 1 - Math.exp(-dt * 6); // ~0.25 s spring
+    const k = 1 - Math.exp(-dt * 5);
     Vector3.LerpToRef(this.camera.position, this.pos, k, this.camera.position);
     const current = this.camera.getTarget();
     Vector3.LerpToRef(current, this.target, k, current);

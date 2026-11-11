@@ -27,8 +27,10 @@ pnpm --filter @tidebound/client dev   # play at http://localhost:5173
 
 ## Controls (offline slice)
 
-- Click enemy water to aim. Each ship fires once per round, the Ironclad twice; clicks fill ships in turn.
+- Your fleet sits in the lagoon of the left floating island, the enemy's in the right one, like the two boards of the paper game.
+- Click the enemy lagoon to aim. Each ship fires once per round, the Ironclad twice; clicks fill ships in turn.
 - WASD / arrows: plan a move for the active ship (a green ghost shows where it goes).
-- Tab: next ship · F: aim view · M: map view · drag: look around · wheel: zoom.
+- Tab: next ship · M: both islands · V: behind your ship · F: enemy close-up · N: sound on/off · drag: look around · wheel: zoom.
+- Sound effects are synthesised in the browser with the Web Audio API (no audio files).
 - Space: fire. A round also fires on its own when the 20 s timer runs out.
 - On phones: tap to aim, arrow pad to move, big Fire button.

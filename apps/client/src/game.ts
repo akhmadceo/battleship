@@ -26,6 +26,7 @@ import {
   shipCells,
   viewFor,
 } from '@tidebound/shared';
+import { Sfx } from './audio';
 import { CameraRig } from './camera';
 import { Fx } from './fx';
 import { Hud } from './hud';
@@ -72,6 +73,7 @@ export class Game {
   private readonly fx: Fx;
   private readonly hud: Hud;
   private readonly rendering: Rendering;
+  private readonly sfx = new Sfx();
 
   private state!: MatchState;
   private phase: 'plan' | 'resolve' | 'over' = 'plan';
@@ -105,8 +107,10 @@ export class Game {
     this.hud = new Hud(overlay, {
       ready: () => this.ready(),
       nextShip: () => this.cycleShip(),
-      toggleMap: () => this.rig.toggle('tactical'),
+      toggleMap: () => this.rig.setMode('overview'),
+      toggleShip: () => this.rig.toggle('chase'),
       toggleAim: () => this.rig.toggle('aim'),
+      toggleSound: () => this.hud.setMuted(this.sfx.toggleMute()),
       move: (dx, dy) => this.planMove(dx, dy),
       restart: () => this.start(this.seed + 1 + Math.floor(Math.random() * 1000)),
     });
@@ -116,6 +120,7 @@ export class Game {
     this.pointer.material = mat(scene, 'move', { emissive: 0.7 });
     this.pointer.isPickable = false;
 
+    this.hud.setMuted(this.sfx.muted);
     this.bindInput();
     this.start(seed);
     scene.onBeforeRenderObservable.add(() => this.update(Math.min(engine.getDeltaTime() / 1000, 0.1)));
@@ -158,7 +163,7 @@ export class Game {
     }
     this.active = this.order()[0] ?? '';
     this.rebuildMarks();
-    this.hud.log('Enemy fleet is hiding in the far sea. Find it!', 'info');
+    this.hud.log('The enemy fleet hides in the lagoon on the right. Find it!', 'info');
     this.beginPlan();
   }
 
@@ -216,12 +221,19 @@ export class Game {
     this.plans.clear();
     if (!this.myShip(this.active) || this.myShip(this.active)!.sunk) this.active = this.order()[0] ?? '';
     this.refreshTargets();
+    if (this.state.round > 0) this.sfx.roundStart();
   }
 
   cycleShip(): void {
     const ids = this.order();
     if (ids.length === 0) return;
     this.active = ids[(ids.indexOf(this.active) + 1) % ids.length]!;
+    this.sfx.click();
+  }
+
+  /** Stereo position for a world x: our island on the left, theirs on the right. */
+  private pan(x: number): number {
+    return x / 160;
   }
 
   /** Toggle a target on an enemy cell, giving it to the active ship or the next ship with a free shell. */
@@ -233,6 +245,7 @@ export class Game {
       if (i >= 0) {
         p.targets.splice(i, 1);
         this.refreshTargets();
+        this.sfx.aim(this.pan(cellCenter('enemy', cell).x), false);
         return;
       }
     }
@@ -245,9 +258,11 @@ export class Game {
       if (p.targets.length < SHIP_CLASSES[ship.placement.cls].shotsPerRound) {
         p.targets.push(cell);
         this.refreshTargets();
+        this.sfx.aim(this.pan(cellCenter('enemy', cell).x), true);
         return;
       }
     }
+    this.sfx.denied();
     this.hud.log('Every ship already has a target. Press Fire!', 'info');
   }
 
@@ -262,16 +277,19 @@ export class Game {
       return;
     }
     if (Math.abs(nx) + Math.abs(ny) > SHIP_CLASSES[ship.placement.cls].speed) {
+      this.sfx.denied();
       this.hud.log(`${CLASS_NAMES[ship.placement.cls]} can't sail that far in one round`, 'info');
       return;
     }
     const moved = { ...ship.placement, x: ship.placement.x + nx, y: ship.placement.y + ny };
     const others = this.state.teams[0].ships.filter((s) => s.placement.id !== ship.placement.id).map((s) => this.planned(s.placement));
     if (!fitsAmong(moved, others)) {
-      this.hud.log('Blocked: ships may not leave the sea or touch each other', 'info');
+      this.sfx.denied();
+      this.hud.log('Blocked: ships may not leave the lagoon or touch each other', 'info');
       return;
     }
     p.move = { dx: nx, dy: ny };
+    this.sfx.move(this.pan(shipCenter('home', moved).x));
   }
 
   ready(): void {
@@ -335,6 +353,8 @@ export class Game {
         const from = v.pos.add(new Vector3(0, 4, 0));
         const to = cellCenter('enemy', e.target, 0.5);
         this.fx.muzzle(from);
+        this.sfx.cannon(this.pan(from.x));
+        this.sfx.whistle(1.4, 0.3);
         this.followShell = this.fx.shell(from, to, 1.4, () => {
           landed++;
           this.impact(e, sunk);
@@ -355,6 +375,7 @@ export class Game {
       if (next.winner) {
         this.phase = 'over';
         this.hud.banner(next.winner === ME ? 'Victory!' : 'Defeat', `Enemy fleet sunk in ${next.round} rounds.`);
+        this.sfx.fanfare(next.winner === ME);
         return;
       }
       this.beginPlan();
@@ -367,6 +388,10 @@ export class Game {
     const at = cellCenter('enemy', e.target, 0.5);
     const label = cellLabel(e.target);
     const from = CLASS_NAMES[this.myShip(e.shipId)!.placement.cls];
+    const pan = this.pan(at.x);
+    if (e.result === 'miss' || e.result === 'repeat') this.sfx.splash(pan);
+    else this.sfx.explosion(e.result === 'sunk', pan);
+    if (e.result === 'sunk') this.sfx.sink(pan);
     switch (e.result) {
       case 'miss':
         this.fx.splash(at);
@@ -502,10 +527,12 @@ export class Game {
       } else if (k === ' ' || k === 'enter') {
         e.preventDefault();
         this.ready();
-      } else if (k === 'm') this.rig.toggle('tactical');
+      } else if (k === 'm') this.rig.setMode('overview');
+      else if (k === 'v') this.rig.toggle('chase');
       else if (k === 'f') this.rig.toggle('aim');
-      else if (k === 'w' || k === 'arrowup') this.planMove(0, 1);
-      else if (k === 's' || k === 'arrowdown') this.planMove(0, -1);
+      else if (k === 'n') this.hud.setMuted(this.sfx.toggleMute());
+      else if (k === 'w' || k === 'arrowup') this.planMove(0, -1);
+      else if (k === 's' || k === 'arrowdown') this.planMove(0, 1);
       else if (k === 'a' || k === 'arrowleft') this.planMove(-1, 0);
       else if (k === 'd' || k === 'arrowright') this.planMove(1, 0);
     });
@@ -522,7 +549,10 @@ export class Game {
     const mine = this.state.teams[0].ships.find(
       (s) => !s.sunk && shipCells(s.placement).some((cc) => cc.x === c.cell.x && cc.y === c.cell.y),
     );
-    if (mine) this.active = mine.placement.id;
+    if (mine && mine.placement.id !== this.active) {
+      this.active = mine.placement.id;
+      this.sfx.click();
+    }
   }
 
   // ---------------------------------------------------------------- frame
@@ -585,7 +615,7 @@ export class Game {
     for (const [i, m] of this.targetMarkers.entries()) m.visibility = 0.55 + 0.35 * Math.sin(this.time * 5 + i);
     if (this.followShell && !this.followShell.isDisposed()) this.rig.focus = this.followShell.position;
 
-    this.sea.setGridEmphasis(this.rig.mode === 'chase' ? 0.2 : 1);
+    this.sea.setGridEmphasis(this.rig.mode === 'chase' ? 0.3 : 1);
     this.rig.update(dt, this.engine.getAspectRatio(this.rig.camera));
     this.sea.update(this.time, this.rig.camera.position);
 

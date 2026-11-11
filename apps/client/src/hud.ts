@@ -5,7 +5,9 @@ export interface HudActions {
   ready(): void;
   nextShip(): void;
   toggleMap(): void;
+  toggleShip(): void;
   toggleAim(): void;
+  toggleSound(): void;
   move(dx: number, dy: number): void;
   restart(): void;
 }
@@ -34,8 +36,10 @@ export class Hud {
         <div class="brand">Tidebound <span>offline slice</span></div>
         <div class="round"><div class="round-label"></div><div class="bar"><div class="fill"></div></div></div>
         <div class="views">
-          <button data-act="aim" title="Aim view (F)">Aim <kbd>F</kbd></button>
-          <button data-act="map" title="Map view (M)">Map <kbd>M</kbd></button>
+          <button data-act="map" title="Both islands (M)">Map <kbd>M</kbd></button>
+          <button data-act="ship" title="Behind your ship (V)">Ship <kbd>V</kbd></button>
+          <button data-act="aim" title="Enemy island close-up (F)">Aim <kbd>F</kbd></button>
+          <button data-act="sound" class="sound" title="Sound on/off (N)">🔊</button>
         </div>
       </div>
       <div class="enemy"><div class="enemy-title">Enemy fleet afloat</div><div class="enemy-list"></div></div>
@@ -48,17 +52,17 @@ export class Hud {
           <button data-act="next" class="small">Next ship <kbd>Tab</kbd></button>
         </div>
         <div class="pad">
-          <button data-move="0,1" aria-label="Move forward">▲</button>
+          <button data-move="0,-1" aria-label="Move up">▲</button>
           <button data-move="-1,0" aria-label="Move left">◀</button>
           <button data-move="1,0" aria-label="Move right">▶</button>
-          <button data-move="0,-1" aria-label="Move back">▼</button>
+          <button data-move="0,1" aria-label="Move down">▼</button>
         </div>
         <button data-act="ready" class="fire">Fire! <kbd>Space</kbd></button>
       </div>
       <div class="banner hidden"><div class="banner-title"></div><div class="banner-sub"></div><button data-act="restart">Play again</button></div>
       <div class="help">
-        Click enemy water to aim (each ship fires once, the Ironclad twice) · WASD / arrows: plan a move ·
-        Tab: next ship · drag: look around · wheel: zoom · <b>Space: fire</b>
+        Your fleet is on the left island. Click the enemy lagoon on the right to aim (the Ironclad fires twice) ·
+        WASD / arrows: plan a move · Tab: next ship · M / V / F: views · wheel: zoom · <b>Space: fire</b>
         <button class="help-close" aria-label="Close help">✕</button>
       </div>`;
     parent.appendChild(this.root);
@@ -75,6 +79,8 @@ export class Hud {
       else if (act === 'next') actions.nextShip();
       else if (act === 'map') actions.toggleMap();
       else if (act === 'aim') actions.toggleAim();
+      else if (act === 'ship') actions.toggleShip();
+      else if (act === 'sound') actions.toggleSound();
       else if (act === 'restart') actions.restart();
       else if (mv) {
         const [dx, dy] = mv.split(',').map(Number) as [number, number];
@@ -123,7 +129,12 @@ export class Hud {
 
   setViews(mode: string): void {
     $(this.root, '[data-act="aim"]').classList.toggle('on', mode === 'aim');
-    $(this.root, '[data-act="map"]').classList.toggle('on', mode === 'tactical');
+    $(this.root, '[data-act="map"]').classList.toggle('on', mode === 'overview');
+    $(this.root, '[data-act="ship"]').classList.toggle('on', mode === 'chase');
+  }
+
+  setMuted(muted: boolean): void {
+    $(this.root, '[data-act="sound"]').textContent = muted ? '🔇' : '🔊';
   }
 
   log(text: string, kind: 'miss' | 'hit' | 'sunk' | 'info'): void {
